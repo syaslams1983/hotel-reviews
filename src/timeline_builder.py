@@ -858,17 +858,15 @@ class TimelineBuilder:
             if first_visual is None:
                 continue
 
-            # Never leave one visual sitting on screen for a long sentence.
-            # A sentence remains intact; only its visual track is subdivided.
+            # Every visual piece must be no longer than 4 seconds.
+            # A sentence can therefore become 1, 2, 3... visual pieces based
+            # strictly on its duration, while still trying to use distinct media.
             max_visual_duration = 4.0
-            min_visual_duration = 2.5
-            keyword_count = max(1, len(self.current_visual_queries))
-            max_by_duration = max(1, int(duration // min_visual_duration))
-            visual_count_needed = min(keyword_count, max_by_duration)
+            visual_count_needed = max(1, int((duration + max_visual_duration - 1e-9) // max_visual_duration))
 
             visuals = [first_visual]
 
-            # Fetch additional distinct visuals for longer sentences.
+            # Fetch enough distinct visuals to keep every visual <= 4 seconds.
             while len(visuals) < visual_count_needed:
                 extra = self.select_visual(
                     text,
@@ -877,16 +875,17 @@ class TimelineBuilder:
                     context_before=context_before,
                     context_after=context_after,
                 )
-                if extra is None:
-                    break
 
-                # Avoid accidentally adding the exact same media path.
-                if str(extra.get("media")) in {
+                if extra is not None and str(extra.get("media")) not in {
                     str(v.get("media")) for v in visuals
                 }:
-                    break
+                    visuals.append(extra)
+                    continue
 
-                visuals.append(extra)
+                # If Pexels/original media cannot provide another distinct
+                # visual, reuse the last selected visual so the hard 4-second
+                # duration limit is still guaranteed.
+                visuals.append(visuals[-1])
 
             piece_duration = duration / len(visuals)
 

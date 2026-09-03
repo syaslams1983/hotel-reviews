@@ -17,3 +17,11 @@ pip install -q faster-whisper ctranslate2 open-clip-torch python-dotenv
 
 !python -u main.py
 
+
+-------
+
+%cd /kaggle/working
+!rm -rf hotel-reviews
+!git clone https://github.com/Syed1mukram/hotel-reviews.git
+%cd /kaggle/working/hotel-reviews
+

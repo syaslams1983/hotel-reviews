@@ -1,6 +1,7 @@
 import os
 import webbrowser
 import subprocess
+import threading
 from io import BytesIO
 from pathlib import Path
 import tkinter as tk
@@ -51,6 +52,7 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
         self.download_cards = []
         self.progress_var = tk.DoubleVar(value=0)
         self.progress_label = tk.StringVar(value="")
+        self.add_stock_label = tk.BooleanVar(value=True)
         self._ui()
 
     def _ui(self):
@@ -70,26 +72,117 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
             pady=9,
         ).pack(fill="x")
 
-        row = ttk.Frame(top)
-        row.pack(fill="x")
+        # Premium search bar + media-type selector.
+        row = tk.Frame(top, bg="#ffffff")
+        row.pack(fill="x", pady=(0, 2))
 
-        entry = ttk.Entry(row, textvariable=self.query, font=("Segoe UI", 14))
-        entry.pack(side="left", fill="x", expand=True, ipady=8)
+        search_shell = tk.Frame(
+            row,
+            bg="#ffffff",
+            highlightthickness=2,
+            highlightbackground="#b9cde2",
+            highlightcolor="#4a90e2",
+        )
+        search_shell.pack(side="left", fill="x", expand=True)
+
+        tk.Label(
+            search_shell,
+            text="⌕",
+            bg="#ffffff",
+            fg="#6d8499",
+            font=("Segoe UI Symbol", 18),
+        ).pack(side="left", padx=(11, 3))
+
+        entry = tk.Entry(
+            search_shell,
+            textvariable=self.query,
+            font=("Segoe UI", 14),
+            bd=0,
+            relief="flat",
+            bg="#ffffff",
+            fg="#17324d",
+            insertbackground="#17324d",
+        )
+        entry.pack(side="left", fill="x", expand=True, ipady=11, padx=(0, 10))
+        self._search_entry = entry
         entry.bind("<Return>", lambda _e: self.search())
 
-        self.kind_combo = ttk.Combobox(
+        type_box = tk.Frame(
             row,
-            textvariable=self.kind,
-            values=("videos", "photos"),
-            state="readonly",
-            width=12,
-            font=("Segoe UI", 12, "bold"),
+            bg="#e8eef5",
+            highlightthickness=1,
+            highlightbackground="#c9d5e1",
         )
-        self.kind_combo.pack(side="left", padx=10, ipady=7)
+        type_box.pack(side="left", padx=10, ipadx=3, ipady=3)
+
+        def set_kind(kind):
+            self.kind.set(kind)
+            refresh_kind_buttons()
+
+        video_btn = tk.Button(
+            type_box,
+            text="🎬 Videos",
+            command=lambda: set_kind("videos"),
+            relief="flat",
+            bd=0,
+            font=("Segoe UI", 10, "bold"),
+            padx=12,
+            pady=7,
+            cursor="hand2",
+        )
+        video_btn.pack(side="left")
+
+        both_btn = tk.Button(
+            type_box,
+            text="◫ Both",
+            command=lambda: set_kind("both"),
+            relief="flat",
+            bd=0,
+            font=("Segoe UI", 10, "bold"),
+            padx=12,
+            pady=7,
+            cursor="hand2",
+        )
+        both_btn.pack(side="left")
+
+        photo_btn = tk.Button(
+            type_box,
+            text="🖼 Photos",
+            command=lambda: set_kind("photos"),
+            relief="flat",
+            bd=0,
+            font=("Segoe UI", 10, "bold"),
+            padx=12,
+            pady=7,
+            cursor="hand2",
+        )
+        photo_btn.pack(side="left")
+
+        def refresh_kind_buttons():
+            selected = self.kind.get()
+            for btn, kind in (
+                (video_btn, "videos"),
+                (both_btn, "both"),
+                (photo_btn, "photos"),
+            ):
+                if selected == kind:
+                    btn.configure(
+                        bg="#f39c12", fg="white",
+                        activebackground="#f39c12",
+                        activeforeground="white",
+                    )
+                else:
+                    btn.configure(
+                        bg="#e8eef5", fg="#35536d",
+                        activebackground="#dbe5ef",
+                        activeforeground="#17324d",
+                    )
+
+        refresh_kind_buttons()
 
         tk.Button(
             row,
-            text="🔎 Search Pexels",
+            text="🔎  Search Pexels",
             command=self.search,
             bg="#4a90e2",
             fg="white",
@@ -105,7 +198,7 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
 
         ttk.Label(
             top,
-            text="12 results first • See more adds the next 12 here",
+            text="80 results loaded • 12 shown at a time • See more adds the next 12 here",
             foreground="#666666",
         ).pack(anchor="w", pady=(5, 0))
 
@@ -130,6 +223,71 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
             textvariable=self.progress_label,
             width=24,
         ).pack(side="left", padx=(8, 0))
+
+        # Premium orange stock-label toggle.
+        stock_toggle = tk.Frame(
+            top,
+            bg="#ffffff",
+            cursor="hand2",
+            highlightthickness=1,
+            highlightbackground="#e6e6e6",
+            highlightcolor="#f39c12",
+        )
+        stock_toggle.pack(anchor="w", pady=(7, 6), padx=1, ipadx=6, ipady=4)
+
+        stock_box = tk.Canvas(
+            stock_toggle,
+            width=22,
+            height=22,
+            bg="#ffffff",
+            highlightthickness=0,
+            bd=0,
+        )
+        stock_box.pack(side="left", padx=(2, 8))
+
+        stock_text = tk.Label(
+            stock_toggle,
+            text="Add stock label to downloaded media  (STOCK VIDEO / STOCK IMAGE)",
+            bg="#ffffff",
+            fg="#16324f",
+            font=("Segoe UI", 12, "bold"),
+            anchor="w",
+            cursor="hand2",
+        )
+        stock_text.pack(side="left", padx=(0, 6))
+
+        def redraw_stock_toggle(*_):
+            stock_box.delete("all")
+            if self.add_stock_label.get():
+                stock_box.create_rectangle(
+                    1, 1, 21, 21,
+                    fill="#f39c12",
+                    outline="#e67e22",
+                    width=1,
+                )
+                stock_box.create_line(
+                    5, 11, 9, 15, 17, 6,
+                    fill="white",
+                    width=2.5,
+                    capstyle="round",
+                    joinstyle="round",
+                )
+            else:
+                stock_box.create_rectangle(
+                    1, 1, 21, 21,
+                    fill="#ffffff",
+                    outline="#b8b8b8",
+                    width=1.5,
+                )
+
+        def toggle_stock(*_):
+            self.add_stock_label.set(not self.add_stock_label.get())
+            redraw_stock_toggle()
+
+        for widget in (stock_toggle, stock_box, stock_text):
+            widget.bind("<Button-1>", toggle_stock)
+
+        redraw_stock_toggle()
 
         self.downloaded_frame = tk.Frame(
             self,
@@ -239,33 +397,49 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
         self._render_downloads()
         self.status.set("Downloaded list cleared. Files remain on disk.")
 
+    def _open_download_folder(self):
+        try:
+            os.startfile(str(DOWNLOAD_DIR))
+            self.status.set(f"Opened folder: {DOWNLOAD_DIR}")
+        except OSError as exc:
+            messagebox.showerror("Open folder failed", str(exc))
+
     def _render_downloads(self):
         for child in self.downloaded_frame.winfo_children():
             child.destroy()
 
-        if not self.download_cards:
-            tk.Label(
-                self.downloaded_frame,
-                text="Downloaded files will appear here.",
-                bg="#eaf5ff",
-                fg="#666666",
-                font=("Segoe UI", 9),
-            ).grid(row=0, column=0, sticky="w", padx=8, pady=6)
-            return
+        header = tk.Frame(self.downloaded_frame, bg="#d7edff")
+        header.grid(row=0, column=0, columnspan=3, sticky="ew")
+        header.grid_columnconfigure(0, weight=1)
 
         tk.Label(
-            self.downloaded_frame,
-            text="Downloaded • drag the dark-blue filename directly into Filmora",
+            header,
+            text="Downloaded  •  drag files directly into Filmora",
             bg="#d7edff",
             fg="#123b5d",
             font=("Segoe UI", 9, "bold"),
             anchor="w",
-            padx=8,
-            pady=5,
-        ).grid(row=0, column=0, sticky="ew")
+            padx=10,
+            pady=6,
+        ).grid(row=0, column=0, sticky="w")
 
         tk.Button(
-            self.downloaded_frame,
+            header,
+            text="📁 Open folder",
+            command=self._open_download_folder,
+            bg="#0b5cab",
+            fg="white",
+            activebackground="#084780",
+            relief="flat",
+            bd=0,
+            font=("Segoe UI", 8, "bold"),
+            padx=10,
+            pady=4,
+            cursor="hand2",
+        ).grid(row=0, column=1, padx=5, pady=4)
+
+        tk.Button(
+            header,
             text="Clear list",
             command=self._clear_download_list,
             bg="#7f8c8d",
@@ -277,7 +451,19 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
             padx=10,
             pady=4,
             cursor="hand2",
-        ).grid(row=0, column=1, padx=6, pady=4)
+        ).grid(row=0, column=2, padx=(0, 6), pady=4)
+
+        if not self.download_cards:
+            tk.Label(
+                self.downloaded_frame,
+                text="No downloaded files yet.",
+                bg="#eaf5ff",
+                fg="#6b7c8c",
+                font=("Segoe UI", 9),
+                padx=10,
+                pady=7,
+            ).grid(row=1, column=0, columnspan=3, sticky="ew")
+            return
 
         for i, item in enumerate(self.download_cards, start=1):
             row = tk.Frame(
@@ -286,7 +472,7 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
                 bd=1,
                 relief="solid",
             )
-            row.grid(row=i, column=0, columnspan=2, sticky="ew", padx=4, pady=2)
+            row.grid(row=i, column=0, columnspan=3, sticky="ew", padx=4, pady=2)
             row.grid_columnconfigure(1, weight=1)
 
             drag_label = tk.Label(
@@ -296,9 +482,9 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
                 fg="#0b3d91",
                 bg="#f7fbff",
                 cursor="hand2",
-                padx=8,
+                padx=9,
             )
-            drag_label.grid(row=0, column=0, sticky="w", pady=5)
+            drag_label.grid(row=0, column=0, sticky="w", pady=6)
 
             if DND_AVAILABLE:
                 try:
@@ -312,8 +498,8 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
             tk.Label(
                 row,
                 text=(
-                    f"Pexels ID: {item.get('pexels_id', 'n/a')} • "
-                    f"{item['type']} • {item.get('duration_text', '')}"
+                    f"Pexels ID: {item.get('pexels_id', 'n/a')}  •  "
+                    f"{item['type']}  •  {item.get('duration_text', '')}"
                 ),
                 bg="#f7fbff",
                 fg="#334e68",
@@ -351,30 +537,108 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
             messagebox.showwarning("Search", "Enter a search query.")
             return
         if not API_KEY:
-            messagebox.showerror("Pexels API", "PEXELS_API_KEY not found in config.py or environment.")
+            messagebox.showerror(
+                "Pexels API",
+                "PEXELS_API_KEY not found in config.py or environment.",
+            )
             return
 
         self.status.set(f"Searching: {q}")
         self.update_idletasks()
+
+        kind = self.kind.get()
+
         try:
-            url = VIDEO_URL if self.kind.get() == "videos" else PHOTO_URL
-            r = requests.get(
-                url,
-                headers={"Authorization": API_KEY},
-                params={"query": q, "per_page": 80, "orientation": "landscape"},
-                timeout=30,
-            )
-            r.raise_for_status()
-            raw = r.json().get("videos" if self.kind.get() == "videos" else "photos", [])
-            self.results = [self._video(x) for x in raw] if self.kind.get() == "videos" else [self._photo(x) for x in raw]
+            if kind == "both":
+                rv = requests.get(
+                    VIDEO_URL,
+                    headers={"Authorization": API_KEY},
+                    params={
+                        "query": q,
+                        "per_page": 80,
+                        "orientation": "landscape",
+                    },
+                    timeout=30,
+                )
+                rv.raise_for_status()
+
+                rp = requests.get(
+                    PHOTO_URL,
+                    headers={"Authorization": API_KEY},
+                    params={
+                        "query": q,
+                        "per_page": 80,
+                        "orientation": "landscape",
+                    },
+                    timeout=30,
+                )
+                rp.raise_for_status()
+
+                videos = [
+                    self._video(x)
+                    for x in rv.json().get("videos", [])
+                ]
+                photos = [
+                    self._photo(x)
+                    for x in rp.json().get("photos", [])
+                ]
+
+                # Both mode: 3 videos + 1 image in every row.
+                self.results = []
+                vi = pi = 0
+
+                while vi < len(videos) or pi < len(photos):
+                    for _ in range(3):
+                        if vi < len(videos):
+                            self.results.append(videos[vi])
+                            vi += 1
+                    if pi < len(photos):
+                        self.results.append(photos[pi])
+                        pi += 1
+                    elif vi >= len(videos):
+                        break
+
+            else:
+                url = VIDEO_URL if kind == "videos" else PHOTO_URL
+                r = requests.get(
+                    url,
+                    headers={"Authorization": API_KEY},
+                    params={
+                        "query": q,
+                        "per_page": 80,
+                        "orientation": "landscape",
+                    },
+                    timeout=30,
+                )
+                r.raise_for_status()
+
+                raw = r.json().get(
+                    "videos" if kind == "videos" else "photos",
+                    [],
+                )
+                self.results = (
+                    [self._video(x) for x in raw]
+                    if kind == "videos"
+                    else [self._photo(x) for x in raw]
+                )
+
             self.visible_count = min(12, len(self.results))
+
         except requests.RequestException as exc:
             messagebox.showerror("Search failed", str(exc))
             self.status.set("Search failed")
             return
 
         self._render()
-        self.status.set(f"{len(self.results)} results for: {q}")
+        self.status.set(
+            f"{len(self.results)} results loaded • showing {self.visible_count}"
+        )
+        self.after(
+            10,
+            lambda: self._load_thumbnails_async(
+                list(self.results[:self.visible_count])
+            ),
+        )
 
     def _video(self, x):
         files = [f for f in x.get("video_files", []) if f.get("link") and f.get("file_type") == "video/mp4"]
@@ -395,11 +659,69 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
         return {
             "id": x.get("id"),
             "type": "photo",
-            "thumb": src.get("medium") or src.get("large"),
+            "thumb": src.get("small") or src.get("medium") or src.get("large"),
             "url": src.get("original") or src.get("large2x") or src.get("large"),
             "width": x.get("width"),
             "height": x.get("height"),
         }
+
+    def _load_thumbnails_async(self, items):
+        """Load small thumbnails quickly in parallel after search results appear."""
+        import concurrent.futures
+
+        def load_one(item):
+            thumb = item.get("thumb")
+            if not thumb:
+                return None
+            try:
+                response = requests.get(
+                    thumb,
+                    timeout=5,
+                    stream=True,
+                )
+                response.raise_for_status()
+                data = response.content
+                im = Image.open(BytesIO(data)).convert("RGB")
+                im.thumbnail((240, 135), Image.LANCZOS)
+                return item.get("id"), im
+            except Exception:
+                return None
+
+        def worker():
+            results = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+                futures = [pool.submit(load_one, item) for item in items]
+                for future in concurrent.futures.as_completed(futures):
+                    result = future.result()
+                    if result:
+                        results.append(result)
+
+            def apply():
+                cards = {
+                    getattr(widget, "_pexels_item_id", None): widget
+                    for widget in self.results_frame.winfo_children()
+                }
+                for item_id, im in results:
+                    card = cards.get(item_id)
+                    if card is None:
+                        continue
+                    children = card.winfo_children()
+                    if not children:
+                        continue
+                    image_box = children[0]
+                    labels = image_box.winfo_children()
+                    if not labels:
+                        continue
+
+                    label = labels[0]
+                    ph = ImageTk.PhotoImage(im)
+                    label.configure(image=ph, text="")
+                    label.image = ph
+                    self.thumb_refs.append(ph)
+
+            self.after(0, apply)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _render(self):
         self._clear()
@@ -407,107 +729,145 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
 
         for i, item in enumerate(visible):
             r, c = divmod(i, 4)
-            card = ttk.Frame(
+
+            card = tk.Frame(
                 self.results_frame,
-                padding=8,
+                bg="#ffffff",
+                bd=1,
                 relief="solid",
-                borderwidth=1,
+                highlightthickness=1,
+                highlightbackground="#d8e2ec",
             )
-            card.grid(
-                row=r,
-                column=c,
-                sticky="nsew",
-                padx=6,
-                pady=6,
-            )
+            card.grid(row=r, column=c, sticky="nsew", padx=6, pady=6)
             self.results_frame.grid_columnconfigure(c, weight=1)
+            card._pexels_item_id = item.get("id")
 
-            img_label = ttk.Label(card, text="Loading preview…")
-            img_label.pack()
+            image_box = tk.Frame(card, bg="#eef5fb", height=170)
+            image_box.pack(fill="x")
+            image_box.pack_propagate(False)
 
-            if item.get("thumb"):
-                try:
-                    data = requests.get(item["thumb"], timeout=20).content
-                    im = Image.open(BytesIO(data)).convert("RGB")
-                    im.thumbnail((220, 124))
-                    ph = ImageTk.PhotoImage(im)
-                    img_label.configure(image=ph, text="")
-                    self.thumb_refs.append(ph)
-                except Exception:
-                    img_label.configure(text="Preview unavailable")
+            img_label = tk.Label(
+                image_box,
+                text="Loading preview…",
+                bg="#eef5fb",
+                fg="#6b7c8c",
+                font=("Segoe UI", 9),
+            )
+            img_label.pack(expand=True, fill="both")
 
-            ttk.Label(
+            # Small type ribbon in the top-right corner of each card.
+            # Orange = VIDEO, blue = IMAGE, so Both mode is instantly clear.
+            ribbon_text = "VIDEO" if item.get("type") == "video" else "IMAGE"
+            ribbon_bg = "#f39c12" if item.get("type") == "video" else "#2f80ed"
+            ribbon = tk.Label(
                 card,
-                text=f"Pexels ID: {item['id']}",
+                text=ribbon_text,
+                bg=ribbon_bg,
+                fg="white",
+                font=("Segoe UI", 8, "bold"),
+                padx=7,
+                pady=2,
+            )
+            ribbon.place(relx=1.0, x=-8, y=8, anchor="ne")
+
+            tk.Label(
+                card,
+                text=f"Pexels ID  {item.get('id')}",
+                bg="#ffffff",
+                fg="#17324d",
                 font=("Segoe UI", 9, "bold"),
-            ).pack(anchor="w")
+                anchor="w",
+            ).pack(anchor="w", padx=10, pady=(8, 2))
 
             if item["type"] == "video":
                 duration = item.get("duration")
-                ttk.Label(
-                    card,
-                    text=(
-                        f"Duration: {float(duration):.1f} sec"
-                        if duration is not None else "Duration: n/a"
-                    ),
-                ).pack(anchor="w")
+                media_line = (
+                    f"VIDEO  •  {float(duration):.1f} sec"
+                    if duration is not None else "VIDEO"
+                )
+            else:
+                media_line = "PHOTO"
 
-            ttk.Label(
+            tk.Label(
+                card,
+                text=media_line,
+                bg="#ffffff",
+                fg="#52677d",
+                font=("Segoe UI", 9),
+                anchor="w",
+            ).pack(anchor="w", padx=10)
+
+            tk.Label(
                 card,
                 text=f"{item.get('width','?')} × {item.get('height','?')}",
-            ).pack(anchor="w")
+                bg="#ffffff",
+                fg="#718096",
+                font=("Segoe UI", 8),
+                anchor="w",
+            ).pack(anchor="w", padx=10, pady=(1, 5))
 
-            btns = ttk.Frame(card)
-            btns.pack(fill="x", pady=(8, 0))
+            btns = tk.Frame(card, bg="#ffffff")
+            btns.pack(fill="x", padx=10, pady=(4, 10))
 
             tk.Button(
                 btns,
-                text="▶ Preview",
+                text="▶  Preview",
                 command=lambda x=item: self.preview(x),
-                bg="#27ae60",
+                bg="#22a65a",
                 fg="white",
-                activebackground="#1e8449",
+                activebackground="#1b8748",
                 relief="flat",
                 bd=0,
                 font=("Segoe UI", 9, "bold"),
                 padx=12,
-                pady=5,
+                pady=6,
                 cursor="hand2",
             ).pack(side="left")
 
             tk.Button(
                 btns,
-                text="⬇ Download",
+                text="⬇  Download",
                 command=lambda x=item: self.download(x),
-                bg="#e67e22",
+                bg="#f08a24",
                 fg="white",
-                activebackground="#d35400",
+                activebackground="#d87311",
                 relief="flat",
                 bd=0,
                 font=("Segoe UI", 9, "bold"),
                 padx=12,
-                pady=5,
+                pady=6,
                 cursor="hand2",
             ).pack(side="right")
 
-        nav = ttk.Frame(self.results_frame, padding=10)
+        nav = tk.Frame(
+            self.results_frame,
+            bg="#f6f9fc",
+            bd=1,
+            relief="solid",
+        )
         nav.grid(
             row=(len(visible) + 3) // 4,
             column=0,
             columnspan=4,
             sticky="ew",
+            padx=6,
+            pady=(4, 10),
         )
 
-        ttk.Label(
+        tk.Label(
             nav,
             text=f"Showing {len(visible)} of {len(self.results)} results",
-            foreground="#555555",
+            bg="#f6f9fc",
+            fg="#5d7187",
+            font=("Segoe UI", 9),
+            padx=10,
+            pady=8,
         ).pack(side="left")
 
         if self.visible_count < len(self.results):
             tk.Button(
                 nav,
-                text="＋ See more",
+                text="＋  See more",
                 command=self.see_more,
                 bg="#2f80ed",
                 fg="white",
@@ -518,11 +878,12 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
                 padx=14,
                 pady=6,
                 cursor="hand2",
-            ).pack(side="right")
+            ).pack(side="right", padx=8, pady=6)
 
         self._bind_wheel_recursive(self.results_frame)
 
     def see_more(self):
+        old_count = self.visible_count
         self.visible_count = min(
             self.visible_count + 12,
             len(self.results),
@@ -530,6 +891,12 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
         self._render()
         self.status.set(
             f"Showing {self.visible_count} of {len(self.results)} results"
+        )
+        self.after(
+            10,
+            lambda: self._load_thumbnails_async(
+                list(self.results[old_count:self.visible_count])
+            ),
         )
 
     def preview(self, item):
@@ -627,6 +994,57 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
         except Exception as exc:
             messagebox.showerror("Preview failed", str(exc))
 
+    def _stock_label_filter(self, label):
+        # Final locked stock-video badge:
+        # bottom-right, yellow Arial 42px, black background at 99% opacity.
+        return (
+            "scale=1920:1080:force_original_aspect_ratio=increase,"
+            "crop=1920:1080,setsar=1,"
+            "drawbox=x=1575:y=954:w=310:h=66:color=black@0.99:t=fill,"
+            "drawtext="
+            f"text='{label}':"
+            "fontcolor=yellow:"
+            "fontsize=42:"
+            "fontfile='C\\:/Windows/Fonts/arial.ttf':"
+            "x=1595:"
+            "y=970"
+        )
+
+
+    def _burn_stock_label_video(self, source, output, label):
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", str(source),
+                "-vf", self._stock_label_filter(label),
+                "-an",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "18",
+                "-pix_fmt", "yuv420p",
+                "-r", "30",
+                str(output),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def _burn_stock_label_image(self, source, output, label):
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", str(source),
+                "-vf", self._stock_label_filter(label),
+                "-frames:v", "1",
+                "-q:v", "2",
+                str(output),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
     def _ask_duration(self, original_duration, pexels_id):
         original = float(original_duration)
         result = {"value": None}
@@ -661,22 +1079,21 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
         entry.grid(row=2, column=0, sticky="ew", pady=(12, 8))
 
         def use_original():
-            value.set(f"{original:.1f}")
-            entry.focus_set()
-            entry.selection_range(0, tk.END)
+            result["value"] = original
+            dlg.destroy()
 
         tk.Button(
             body,
-            text="Use original",
+            text="Use original  →  Download",
             command=use_original,
             bg="#2f80ed",
             fg="white",
             activebackground="#2568bd",
             relief="flat",
             bd=0,
-            font=("Segoe UI", 9, "bold"),
-            padx=12,
-            pady=5,
+            font=("Segoe UI", 10, "bold"),
+            padx=16,
+            pady=7,
             cursor="hand2",
         ).grid(row=2, column=1, padx=(8, 0), pady=(12, 8))
 
@@ -788,8 +1205,7 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
                     if total:
                         self.progress_var.set(done * 100 / total)
                         self.progress_label.set(
-                            f"{done/1048576:.1f} / "
-                            f"{total/1048576:.1f} MB"
+                            f"{done/1048576:.1f} / {total/1048576:.1f} MB"
                         )
                     else:
                         self.progress_label.set(
@@ -798,9 +1214,7 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
                     self.update_idletasks()
 
             if item.get("type") == "video" and requested_duration is not None:
-                self.status.set(
-                    f"Trimming to {requested_duration:.1f} sec…"
-                )
+                self.status.set(f"Trimming to {requested_duration:.1f} sec…")
                 self.progress_label.set("Trimming…")
                 self.update_idletasks()
 
@@ -824,6 +1238,36 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
                     f"{float(source_duration):.1f} sec"
                     if source_duration is not None else ""
                 )
+
+            if self.add_stock_label.get():
+                label = (
+                    "STOCK VIDEO"
+                    if item.get("type") == "video"
+                    else "STOCK IMAGE"
+                )
+                labeled_target = target.with_name(
+                    f".{target.stem}_labeled{target.suffix}"
+                )
+
+                self.status.set(f"Applying {label} label…")
+                self.progress_label.set("Labeling…")
+                self.update_idletasks()
+
+                if item.get("type") == "video":
+                    self._burn_stock_label_video(
+                        target,
+                        labeled_target,
+                        label,
+                    )
+                else:
+                    self._burn_stock_label_image(
+                        target,
+                        labeled_target,
+                        label,
+                    )
+
+                target.unlink(missing_ok=True)
+                labeled_target.replace(target)
 
             self.download_cards.append(
                 {
@@ -852,6 +1296,7 @@ class PexelsHelper(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
                     path.unlink(missing_ok=True)
                 except Exception:
                     pass
+
             self.progress_var.set(0)
             self.progress_label.set("")
             messagebox.showerror("Download failed", str(exc))
